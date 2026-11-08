@@ -30,3 +30,7 @@
 
 
 
+## Демонстрация
+https://asciinema.org/a/X84AKGgQmgF2Z2Iz
+
+
