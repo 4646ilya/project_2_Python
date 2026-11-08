@@ -11,3 +11,12 @@
 
     create_table users name:str age:int is_active:bool
     Таблица "users" успешно создана со столбцами: ID:int, name:str, age:int, is_active:bool
+
+
+## CRUD-операции
+
+- `insert into <таблица> values (...)` — добавить запись (ID генерируется автоматически)
+- `select from <таблица> [where <столбец> = <значение>]` — прочитать записи
+- `update <таблица> set <столбец> = <значение> where <условие>` — обновить записи
+- `delete from <таблица> where <условие>` — удалить записи
+- `info <таблица>` — информация о таблице

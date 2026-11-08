@@ -1,45 +1,14 @@
 from .constants import ID_COLUMN, ID_TYPE, VALID_TYPES
+from .decorators import confirm_action, create_cacher, handle_db_errors, log_time
+
+_select_cache = create_cacher()
+_data_version = 0
 
 
-def create_table(metadata, table_name, columns):
-    """Создаёт таблицу в метаданных.
-
-    Автоматически добавляет столбец ID:int в начало.
-    Возвращает обновлённый словарь метаданных.
-    """
-    if table_name in metadata:
-        print(f'Ошибка: Таблица "{table_name}" уже существует.')
-        return metadata
-    for col_name, col_type in columns.items():
-        if col_type not in VALID_TYPES:
-            print(
-                f"Некорректное значение: {col_name}:{col_type}."
-                " Попробуйте снова."
-            )
-            return metadata
-    full_columns = {ID_COLUMN: ID_TYPE, **columns}
-    metadata[table_name] = full_columns
-    columns_str = ", ".join(f"{n}:{t}" for n, t in full_columns.items())
-    print(f'Таблица "{table_name}" успешно создана со столбцами: {columns_str}')
-    return metadata
-
-
-def drop_table(metadata, table_name):
-    """Удаляет таблицу из метаданных.
-
-    Возвращает обновлённый словарь метаданных.
-    """
-    if table_name not in metadata:
-        print(f'Ошибка: Таблица "{table_name}" не существует.')
-        return metadata
-    del metadata[table_name]
-    print(f'Таблица "{table_name}" успешно удалена.')
-    return metadata
-
-
-def list_tables(metadata):
-    """Возвращает список имён таблиц."""
-    return list(metadata.keys())
+def _bump_version():
+    """Инкрементирует версию данных, сбрасывая устаревший кэш."""
+    global _data_version
+    _data_version += 1
 
 
 def check_value_type(value, expected_type):
@@ -51,6 +20,51 @@ def check_value_type(value, expected_type):
     return isinstance(value, str)
 
 
+@handle_db_errors
+def create_table(metadata, table_name, columns):
+    """Создаёт таблицу в метаданных.
+
+    Автоматически добавляет столбец ID:int в начало.
+    Возвращает обновлённый словарь метаданных.
+    """
+    if table_name in metadata:
+        print(f'Ошибка: Таблица "{table_name}" уже существует.')
+        return metadata
+    for col_name, col_type in columns.items():
+        if col_type not in VALID_TYPES:
+            print(f"Некорректное значение: {col_name}:{col_type}. Попробуйте снова.")
+            return metadata
+    full_columns = {ID_COLUMN: ID_TYPE, **columns}
+    metadata[table_name] = full_columns
+    columns_str = ", ".join(f"{n}:{t}" for n, t in full_columns.items())
+    print(f'Таблица "{table_name}" успешно создана со столбцами: {columns_str}')
+    _bump_version()
+    return metadata
+
+
+@confirm_action("удаление таблицы")
+@handle_db_errors
+def drop_table(metadata, table_name):
+    """Удаляет таблицу из метаданных.
+
+    Возвращает обновлённый словарь метаданных.
+    """
+    if table_name not in metadata:
+        print(f'Ошибка: Таблица "{table_name}" не существует.')
+        return metadata
+    del metadata[table_name]
+    print(f'Таблица "{table_name}" успешно удалена.')
+    _bump_version()
+    return metadata
+
+
+def list_tables(metadata):
+    """Возвращает список имён таблиц."""
+    return list(metadata.keys())
+
+
+@handle_db_errors
+@log_time
 def insert(metadata, table_name, table_data, values):
     """Добавляет запись в данные таблицы.
 
@@ -75,6 +89,7 @@ def insert(metadata, table_name, table_data, values):
             return None
         record[column_name] = value
     table_data.append(record)
+    _bump_version()
     return record
 
 
@@ -82,16 +97,23 @@ def records_match(record, where_clause):
     """Проверяет, подходит ли запись под условие where."""
     if where_clause is None:
         return True
-    return all(
-        record.get(column) == value for column, value in where_clause.items()
+    return all(record.get(column) == value for column, value in where_clause.items())
+
+
+@handle_db_errors
+@log_time
+def select(table_data, where_clause=None):
+    """Возвращает записи, подходящие под условие, или все записи.
+
+    Результат кэшируется через замыкание с учётом версии данных.
+    """
+    key = (str(where_clause), _data_version)
+    return _select_cache(
+        key, lambda: [r for r in table_data if records_match(r, where_clause)]
     )
 
 
-def select(table_data, where_clause=None):
-    """Возвращает записи, подходящие под условие, или все записи."""
-    return [record for record in table_data if records_match(record, where_clause)]
-
-
+@handle_db_errors
 def update(table_data, metadata_columns, set_clause, where_clause):
     """Обновляет поля записей по условию.
 
@@ -112,9 +134,13 @@ def update(table_data, metadata_columns, set_clause, where_clause):
         if records_match(record, where_clause):
             record.update(set_clause)
             updated.append(record)
+    if updated:
+        _bump_version()
     return updated
 
 
+@confirm_action("удаление записей")
+@handle_db_errors
 def delete(table_data, where_clause):
     """Удаляет записи по условию. Возвращает список удалённых."""
     kept = []
@@ -124,5 +150,7 @@ def delete(table_data, where_clause):
             deleted.append(record)
         else:
             kept.append(record)
-    table_data[:] = kept
+    if deleted:
+        table_data[:] = kept
+        _bump_version()
     return deleted

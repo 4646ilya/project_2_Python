@@ -208,6 +208,8 @@ def run_delete(user_input, args):
         return
     table_data = load_table_data(table_name)
     deleted = core.delete(table_data, where_clause)
+    if deleted is None:
+        return
     if not deleted:
         print("Записи не найдены.")
         return
